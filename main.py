@@ -92,10 +92,19 @@ def get_stream_url(video_id: str):
             'format': 'bestaudio/best',
             'quiet': True,
             'no_warnings': True,
+            'nocheckcertificate': True,
+            'user_agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36'
         }
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            info = ydl.extract_info(f"https://www.youtube.com/watch?v={video_id}", download=False)
-            return {"url": info['url'], "title": info.get('title'), "duration": info.get('duration')}
+            try:
+                info = ydl.extract_info(f"https://www.youtube.com/watch?v={video_id}", download=False)
+                if not info or 'url' not in info:
+                    raise HTTPException(status_code=404, detail="Stream URL not found in extraction info.")
+                return {"url": info['url'], "title": info.get('title'), "duration": info.get('duration')}
+            except Exception as e:
+                # Log detailed error for debugging purposes (Vercel logs)
+                print(f"Extraction error for {video_id}: {str(e)}")
+                raise HTTPException(status_code=500, detail=f"Extraction failed: {str(e)}")
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 

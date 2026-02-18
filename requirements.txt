@@ -1,4 +1,4 @@
 fastapi
 uvicorn
 ytmusicapi
-yt-dlp
+yt-dlp>=2024.12.30
