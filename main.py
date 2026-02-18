@@ -106,6 +106,12 @@ def get_stream_url(video_id: str):
                 'Sec-Fetch-Mode': 'navigate',
             }
         }
+
+        # Use cookies.txt if it exists to bypass bot detection
+        if os.path.exists("cookies.txt"):
+            ydl_opts['cookiefile'] = 'cookies.txt'
+            print("Using cookies.txt for authentication")
+
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             try:
                 info = ydl.extract_info(f"https://www.youtube.com/watch?v={video_id}", download=False)
