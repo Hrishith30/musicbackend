@@ -87,41 +87,62 @@ def get_radio(video_id: str):
 
 @app.get("/play/{video_id}")
 def get_stream_url(video_id: str):
-    try:
-        ydl_opts = {
-            'format': 'bestaudio/best',
-            'quiet': True,
-            'no_warnings': True,
-            'nocheckcertificate': True,
-            'noplaylist': True,
-        }
+    # Strategy pattern: Try different configurations until one works
+    strategies = [
+        # Strategy 1: Best audio with cookies
+        {"format": "bestaudio/best", "use_cookies": True, "title": "Standard+Cookies"},
+        # Strategy 2: iOS client with cookies (Very robust)
+        {"format": "bestaudio/best", "use_cookies": True, "client": "ios", "title": "iOS+Cookies"},
+        # Strategy 3: Best available with cookies (Loosest format)
+        {"format": "best", "use_cookies": True, "title": "Best+Cookies"},
+        # Strategy 4: Standard without cookies (Hail Mary)
+        {"format": "bestaudio/best", "use_cookies": False, "title": "Standard-NoCookies"},
+    ]
 
-        # Use cookies to bypass bot detection
-        # Priority 1: Environment Variable (Safe for public repos)
-        # Priority 2: cookies.txt file (Simple local use)
-        cookies_content = os.getenv("YOUTUBE_COOKIES")
-        if cookies_content:
-            temp_cookies_path = "/tmp/cookies.txt" if os.name != 'nt' else "temp_cookies.txt"
-            with open(temp_cookies_path, "w", encoding="utf-8") as f:
-                f.write(cookies_content)
-            ydl_opts['cookiefile'] = temp_cookies_path
-            print("Using cookies from environment variable")
-        elif os.path.exists("cookies.txt"):
-            ydl_opts['cookiefile'] = 'cookies.txt'
-            print("Using cookies.txt for authentication")
+    errors = []
+    
+    for strategy in strategies:
+        try:
+            ydl_opts = {
+                'format': strategy['format'],
+                'quiet': True,
+                'no_warnings': True,
+                'nocheckcertificate': True,
+                'noplaylist': True,
+            }
+            
+            # Setup client spoofing if requested
+            if strategy.get("client") == "ios":
+                ydl_opts['extractor_args'] = {'youtube': {'player_client': ['ios']}}
+                ydl_opts['user_agent'] = 'Mozilla/5.0 (iPhone; CPU iPhone OS 16_6 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.6 Mobile/15E148 Safari/604.1'
+            
+            # Setup cookies if requested
+            if strategy.get("use_cookies"):
+                cookies_content = os.getenv("YOUTUBE_COOKIES")
+                if cookies_content:
+                    temp_cookies_path = "/tmp/cookies.txt" if os.name != 'nt' else "temp_cookies.txt"
+                    with open(temp_cookies_path, "w", encoding="utf-8") as f:
+                        f.write(cookies_content)
+                    ydl_opts['cookiefile'] = temp_cookies_path
+                elif os.path.exists("cookies.txt"):
+                    ydl_opts['cookiefile'] = 'cookies.txt'
+                else:
+                    # Skip cookie strategy if no cookies available
+                    continue
 
-        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            try:
+            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
                 info = ydl.extract_info(f"https://www.youtube.com/watch?v={video_id}", download=False)
-                if not info or 'url' not in info:
-                    raise HTTPException(status_code=404, detail="Stream URL not found in extraction info.")
-                return {"url": info['url'], "title": info.get('title'), "duration": info.get('duration')}
-            except Exception as e:
-                # Log detailed error for debugging purposes (Vercel logs)
-                print(f"Extraction error for {video_id}: {str(e)}")
-                raise HTTPException(status_code=500, detail=f"Extraction failed: {str(e)}")
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+                if info and 'url' in info:
+                    print(f"Extraction success using {strategy['title']}")
+                    return {"url": info['url'], "title": info.get('title'), "duration": info.get('duration'), "strategy": strategy['title']}
+                
+        except Exception as e:
+            error_msg = f"{strategy['title']} failed: {str(e)}"
+            print(error_msg)
+            errors.append(error_msg)
+
+    # If all strategies failed
+    raise HTTPException(status_code=500, detail=f"All extraction strategies failed: {' | '.join(errors)}")
 
 if __name__ == "__main__":
     import uvicorn
