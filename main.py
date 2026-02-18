@@ -87,15 +87,24 @@ def get_radio(video_id: str):
 
 @app.get("/play/{video_id}")
 def get_stream_url(video_id: str):
-    # Strategy pattern: Try different configurations until one works
+    # Expanded Waterfall: Try everything to bypass blocks & format errors
     strategies = [
-        # Strategy 1: Best audio with cookies
+        # 1. Best Audio with cookies (Our standard)
         {"format": "bestaudio/best", "use_cookies": True, "title": "Standard+Cookies"},
-        # Strategy 2: iOS client with cookies (Very robust)
+        
+        # 2. TV Client WITHOUT cookies (Often bypasses IP blocks)
+        {"format": "bestaudio/best", "use_cookies": False, "client": "tv", "title": "TV-NoCookies"},
+        
+        # 3. iOS Client with cookies (Robust fallback)
         {"format": "bestaudio/best", "use_cookies": True, "client": "ios", "title": "iOS+Cookies"},
-        # Strategy 3: Best available with cookies (Loosest format)
-        {"format": "best", "use_cookies": True, "title": "Best+Cookies"},
-        # Strategy 4: Standard without cookies (Hail Mary)
+        
+        # 4. Android Client WITHOUT cookies (Another bypass candidate)
+        {"format": "bestaudio/best", "use_cookies": False, "client": "android", "title": "Android-NoCookies"},
+        
+        # 5. Best available with cookies (Bypasses format=bestaudio issues)
+        {"format": "best", "use_cookies": True, "title": "BestAvailable+Cookies"},
+        
+        # 6. Absolute fallback (Try anything without cookies)
         {"format": "bestaudio/best", "use_cookies": False, "title": "Standard-NoCookies"},
     ]
 
@@ -111,12 +120,16 @@ def get_stream_url(video_id: str):
                 'noplaylist': True,
             }
             
-            # Setup client spoofing if requested
-            if strategy.get("client") == "ios":
+            # Setup client spoofing
+            if strategy.get("client") == "tv":
+                ydl_opts['extractor_args'] = {'youtube': {'player_client': ['tv']}}
+            elif strategy.get("client") == "ios":
                 ydl_opts['extractor_args'] = {'youtube': {'player_client': ['ios']}}
                 ydl_opts['user_agent'] = 'Mozilla/5.0 (iPhone; CPU iPhone OS 16_6 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.6 Mobile/15E148 Safari/604.1'
-            
-            # Setup cookies if requested
+            elif strategy.get("client") == "android":
+                ydl_opts['extractor_args'] = {'youtube': {'player_client': ['android']}}
+
+            # Setup cookies
             if strategy.get("use_cookies"):
                 cookies_content = os.getenv("YOUTUBE_COOKIES")
                 if cookies_content:
@@ -127,8 +140,7 @@ def get_stream_url(video_id: str):
                 elif os.path.exists("cookies.txt"):
                     ydl_opts['cookiefile'] = 'cookies.txt'
                 else:
-                    # Skip cookie strategy if no cookies available
-                    continue
+                    continue # Skip if no cookies
 
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
                 info = ydl.extract_info(f"https://www.youtube.com/watch?v={video_id}", download=False)
@@ -141,8 +153,19 @@ def get_stream_url(video_id: str):
             print(error_msg)
             errors.append(error_msg)
 
-    # If all strategies failed
-    raise HTTPException(status_code=500, detail=f"All extraction strategies failed: {' | '.join(errors)}")
+    # Final attempt: List all formats and pick ANY that has a URL
+    try:
+        ydl_opts = {'quiet': True, 'nocheckcertificate': True}
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            info = ydl.extract_info(f"https://www.youtube.com/watch?v={video_id}", download=False)
+            for f in info.get('formats', []):
+                if f.get('url'):
+                    print("Emergency fallback success")
+                    return {"url": f['url'], "title": info.get('title'), "strategy": "EmergencyFallback"}
+    except:
+        pass
+
+    raise HTTPException(status_code=500, detail=f"All 6 strategies + Emergency fallback failed. Errors: {' | '.join(errors)}")
 
 if __name__ == "__main__":
     import uvicorn
