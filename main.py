@@ -18,18 +18,16 @@ app.add_middleware(
 )
 
 
-# Mount static files
-app.mount("/static", StaticFiles(directory="static"), name="static")
+# Static files handled by GitHub Pages
+# app.mount("/static", StaticFiles(directory="static"), name="static")
+
 
 yt = YTMusic()
 
 @app.get("/")
 def read_root():
-    return FileResponse('static/index.html')
+    return {"status": "online", "message": "Unofficial YouTube Music API is running"}
 
-@app.get('/favicon.ico', include_in_schema=False)
-async def favicon():
-    return FileResponse('static/music.png') if os.path.exists('static/music.png') else ""
 
 @app.get("/search")
 def search(query: str, filter: str = Query(None, enum=["songs", "videos", "albums", "artists", "playlists", "community_playlists", "featured_playlists", "uploads"])):
