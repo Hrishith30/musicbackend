@@ -107,8 +107,17 @@ def get_stream_url(video_id: str):
             }
         }
 
-        # Use cookies.txt if it exists to bypass bot detection
-        if os.path.exists("cookies.txt"):
+        # Use cookies to bypass bot detection
+        # Priority 1: Environment Variable (Safe for public repos)
+        # Priority 2: cookies.txt file (Simple local use)
+        cookies_content = os.getenv("YOUTUBE_COOKIES")
+        if cookies_content:
+            temp_cookies_path = "/tmp/cookies.txt" if os.name != 'nt' else "temp_cookies.txt"
+            with open(temp_cookies_path, "w", encoding="utf-8") as f:
+                f.write(cookies_content)
+            ydl_opts['cookiefile'] = temp_cookies_path
+            print("Using cookies from environment variable")
+        elif os.path.exists("cookies.txt"):
             ydl_opts['cookiefile'] = 'cookies.txt'
             print("Using cookies.txt for authentication")
 
