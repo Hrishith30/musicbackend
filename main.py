@@ -89,28 +89,41 @@ def get_radio(video_id: str):
 def get_stream_url(video_id: str):
     # Expanded Waterfall: Try everything to bypass blocks & format errors
     strategies = [
-        # 1. Best Audio with cookies (Our standard)
-        {"format": "bestaudio/best", "use_cookies": True, "title": "Standard+Cookies"},
-        
-        # 2. TV Client WITHOUT cookies (Often bypasses IP blocks)
+        # 1. TV Client (Often bypasses IP blocks without cookies)
         {"format": "bestaudio/best", "use_cookies": False, "client": "tv", "title": "TV-NoCookies"},
         
-        # 3. iOS Client with cookies (Robust fallback)
+        # 2. Web Embedded with cookies (Often different format availability)
+        {"format": "bestaudio/best", "use_cookies": True, "client": "web_embedded", "title": "WebEmbedded+Cookies"},
+        
+        # 3. iOS Client with cookies (Robust authenticated fallback)
         {"format": "bestaudio/best", "use_cookies": True, "client": "ios", "title": "iOS+Cookies"},
         
-        # 4. Android Client WITHOUT cookies (Another bypass candidate)
+        # 4. Android Client WITHOUT cookies (Another unauthenticated bypass)
         {"format": "bestaudio/best", "use_cookies": False, "client": "android", "title": "Android-NoCookies"},
         
-        # 5. Best available with cookies (Bypasses format=bestaudio issues)
-        {"format": "best", "use_cookies": True, "title": "BestAvailable+Cookies"},
+        # 5. Standard with cookies (Our baseline authenticated)
+        {"format": "bestaudio/best", "use_cookies": True, "title": "Standard+Cookies"},
         
         # 6. Absolute fallback (Try anything without cookies)
         {"format": "bestaudio/best", "use_cookies": False, "title": "Standard-NoCookies"},
     ]
 
     errors = []
+    cookies_present = False
+    cookies_content = os.getenv("YOUTUBE_COOKIES")
     
+    if cookies_content:
+        cookies_present = True
+        print(f"Cookies from ENV: {len(cookies_content)} chars")
+    elif os.path.exists("cookies.txt"):
+        cookies_present = True
+        print("Cookies from FILE present")
+
     for strategy in strategies:
+        # Skip authenticated strategies if no cookies available
+        if strategy.get("use_cookies") and not cookies_present:
+            continue
+
         try:
             ydl_opts = {
                 'format': strategy['format'],
@@ -128,10 +141,11 @@ def get_stream_url(video_id: str):
                 ydl_opts['user_agent'] = 'Mozilla/5.0 (iPhone; CPU iPhone OS 16_6 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.6 Mobile/15E148 Safari/604.1'
             elif strategy.get("client") == "android":
                 ydl_opts['extractor_args'] = {'youtube': {'player_client': ['android']}}
+            elif strategy.get("client") == "web_embedded":
+                ydl_opts['extractor_args'] = {'youtube': {'player_client': ['web_embedded']}}
 
             # Setup cookies
             if strategy.get("use_cookies"):
-                cookies_content = os.getenv("YOUTUBE_COOKIES")
                 if cookies_content:
                     temp_cookies_path = "/tmp/cookies.txt" if os.name != 'nt' else "temp_cookies.txt"
                     with open(temp_cookies_path, "w", encoding="utf-8") as f:
@@ -139,8 +153,6 @@ def get_stream_url(video_id: str):
                     ydl_opts['cookiefile'] = temp_cookies_path
                 elif os.path.exists("cookies.txt"):
                     ydl_opts['cookiefile'] = 'cookies.txt'
-                else:
-                    continue # Skip if no cookies
 
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
                 info = ydl.extract_info(f"https://www.youtube.com/watch?v={video_id}", download=False)
@@ -149,7 +161,9 @@ def get_stream_url(video_id: str):
                     return {"url": info['url'], "title": info.get('title'), "duration": info.get('duration'), "strategy": strategy['title']}
                 
         except Exception as e:
-            error_msg = f"{strategy['title']} failed: {str(e)}"
+            # Get the exact error message fromyt-dlp
+            err_str = str(e).split('\n')[0] # Get first line of error
+            error_msg = f"{strategy['title']} failed: {err_str}"
             print(error_msg)
             errors.append(error_msg)
 
@@ -162,10 +176,14 @@ def get_stream_url(video_id: str):
                 if f.get('url'):
                     print("Emergency fallback success")
                     return {"url": f['url'], "title": info.get('title'), "strategy": "EmergencyFallback"}
-    except:
-        pass
+    except Exception as e:
+        errors.append(f"EmergencyFallback failed: {str(e).split('\n')[0]}")
 
-    raise HTTPException(status_code=500, detail=f"All 6 strategies + Emergency fallback failed. Errors: {' | '.join(errors)}")
+    raise HTTPException(status_code=500, detail={
+        "message": "All extraction strategies failed",
+        "errors": errors,
+        "cookies_detected": cookies_present
+    })
 
 if __name__ == "__main__":
     import uvicorn
