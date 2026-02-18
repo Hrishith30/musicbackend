@@ -5,7 +5,18 @@ from ytmusicapi import YTMusic
 import yt_dlp
 import os
 
+from fastapi.middleware.cors import CORSMiddleware
+
 app = FastAPI(title="Unofficial YouTube Music API")
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
 
 # Mount static files
 app.mount("/static", StaticFiles(directory="static"), name="static")
